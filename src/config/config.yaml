@@ -1,0 +1,22 @@
+# src/config/config.yaml
+project_name: "SKKU-OS-AI-Project1"
+model:
+  num_classes: 21  # Pascal VOC: 20 classes + 1 background
+  pretrained: true
+
+data:
+  root: "./data"
+  batch_size: 16
+  num_workers: 2
+
+train:
+  epochs: 50
+  lr: 0.0001
+  weight_decay: 0.0005
+  checkpoint_dir: "/content/drive/MyDrive/Colab_Checkpoints/Project1"
+  resume: false # true로 변경 시 latest_model.pth에서 이어서 학습
+
+wandb:
+  use: true
+  entity: "sjjeon0925-sungkyunkwan-university"  # 본인의 WandB ID로 수정
+  name: "mobilenetv2_aspp_v1"
