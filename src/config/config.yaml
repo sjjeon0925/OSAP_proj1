@@ -13,10 +13,14 @@ train:
   epochs: 50
   lr: 0.0001
   weight_decay: 0.0005
-  checkpoint_dir: "/content/drive/MyDrive/Colab_Checkpoints/Project1"
+  checkpoint_dir: "/content/drive/MyDrive/Colab_Checkpoints/Project1/v2"
   resume: false # true로 변경 시 latest_model.pth에서 이어서 학습
 
 wandb:
   use: true
   entity: "sjjeon0925-sungkyunkwan-university"  # 본인의 WandB ID로 수정
-  name: "mobilenetv2_aspp_v1"
+  name: "mobilenetv2_aspp_v2"
+
+submit:
+  pred_dir: "/content/drive/MyDrive/Colab_Checkpoints/Project1/v2/pred"
+  onnx_path: "/content/drive/MyDrive/Colab_Checkpoints/Project1/v2/model.onnx"

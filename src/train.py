@@ -33,12 +33,17 @@ def train():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # Colab 서버에 데이터가 없을 경우를 대비해 항상 다운로드를 확인하도록 수정
-    train_loader = get_dataloader(config['data']['root'], config['data']['batch_size'], "train", download=True)
-    val_loader = get_dataloader(config['data']['root'], config['data']['batch_size'], "val", download=True)
+    train_loader = get_dataloader(config['data']['root'], config['data']['batch_size'], "train",
+                                  num_workers=config['data']['num_workers'], download=True)
+    val_loader = get_dataloader(config['data']['root'], config['data']['batch_size'], "val",
+                                num_workers=config['data']['num_workers'], download=True)
     model = build_model(num_classes=config['model']['num_classes']).to(device)
 
     criterion = nn.CrossEntropyLoss(ignore_index=255)
     optimizer = torch.optim.AdamW(model.parameters(), lr=config['train']['lr'], weight_decay=config['train']['weight_decay'])
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, T_max=config['train']['epochs'], eta_min=config['train']['lr'] * 0.01
+    )
 
     start_epoch = 0
     best_miou = 0.0
@@ -53,6 +58,8 @@ def train():
             best_miou = checkpoint['best_miou']
             model.load_state_dict(checkpoint['model_state_dict'])
             optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            if 'scheduler_state_dict' in checkpoint:
+                scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
             print(f"=> Loaded checkpoint (epoch {checkpoint['epoch']})")
         else:
             print(f"=> No checkpoint found at '{latest_ckpt_path}', starting from scratch.")
@@ -87,11 +94,15 @@ def train():
         miou = validate(model, val_loader, device, config['model']['num_classes'])
         print(f"Epoch {epoch+1} | Avg Train Loss: {avg_train_loss:.4f} | Val mIoU: {miou:.4f}")
 
+        current_lr = scheduler.get_last_lr()[0]
+        scheduler.step()
+
         if config['wandb']['use']:
             wandb.log({
                 "epoch": epoch + 1,
                 "epoch_train_loss": avg_train_loss,
-                "val_miou": miou
+                "val_miou": miou,
+                "lr": current_lr,
             })
 
         # 옵티마이저 상태와 에포크를 포함하여 체크포인트 저장
@@ -103,6 +114,7 @@ def train():
             'epoch': epoch,
             'model_state_dict': model.state_dict(),
             'optimizer_state_dict': optimizer.state_dict(),
+            'scheduler_state_dict': scheduler.state_dict(),
             'best_miou': best_miou,
         }
 

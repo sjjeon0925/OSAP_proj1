@@ -67,14 +67,14 @@ class ASPP(nn.Module):
         # Global pooling & upsample
         pool_feat = self.global_pool(x)
         pool_feat = F.interpolate(pool_feat, size=x.shape[-2:], mode='bilinear', align_corners=False)
-        
+
         # 1x1 and Dilated Convs
         branch1_feat = self.branch1(x)
         branch_feats = [branch(x) for branch in self.branches]
-        
+
         # Concat all features
         concat_feat = torch.cat([pool_feat, branch1_feat] + branch_feats, dim=1)
-        
+
         # Projection
         out = self.project(concat_feat)
         return out
@@ -90,10 +90,10 @@ class SemanticSegmentationModel(nn.Module):
         # 1. Backbone: TorchVision pretrained ImageNet-1K weights (Segmentation weights 금지 규정 준수)
         weights = MobileNet_V2_Weights.IMAGENET1K_V1
         mobilenet = mobilenet_v2(weights=weights)
-        
+
         # Classifier 제외하고 Feature Extractor만 사용
         self.backbone = mobilenet.features
-        
+
         # MobileNetV2의 최종 feature channel은 1280
         backbone_out_channels = 1280
 
@@ -110,13 +110,13 @@ class SemanticSegmentationModel(nn.Module):
 
         # Feature Extraction
         feat = self.backbone(x)
-        
+
         # Context Aggregation
         feat = self.neck(feat)
-        
+
         # Prediction
         out = self.head(feat)
-        
+
         # Upsample to original input resolution
         out = F.interpolate(out, size=input_size, mode='bilinear', align_corners=False)
 
