@@ -6,21 +6,21 @@ model:
 
 data:
   root: "./data"
-  batch_size: 16
+  batch_size: 8
   num_workers: 2
 
 train:
   epochs: 50
   lr: 0.0001
   weight_decay: 0.0005
-  checkpoint_dir: "/content/drive/MyDrive/Colab_Checkpoints/Project1/v2"
+  checkpoint_dir: "/content/drive/MyDrive/Colab_Checkpoints/Project1/v3"
   resume: false # true로 변경 시 latest_model.pth에서 이어서 학습
 
 wandb:
   use: true
   entity: "sjjeon0925-sungkyunkwan-university"  # 본인의 WandB ID로 수정
-  name: "mobilenetv2_aspp_v2"
+  name: "resnet50_aspp_v3"
 
 submit:
-  pred_dir: "/content/drive/MyDrive/Colab_Checkpoints/Project1/v2/pred"
-  onnx_path: "/content/drive/MyDrive/Colab_Checkpoints/Project1/v2/model.onnx"
+  pred_dir: "/content/drive/MyDrive/Colab_Checkpoints/Project1/v3/pred"
+  onnx_path: "/content/drive/MyDrive/Colab_Checkpoints/Project1/v3/model.onnx"
