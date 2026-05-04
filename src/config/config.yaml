@@ -9,12 +9,12 @@ data:
   coco_root: "/content/data/coco"
   coco_zip_images: "/content/drive/MyDrive/Colab_Checkpoints/Project1/coco/train2017.zip"
   coco_zip_annotations: "/content/drive/MyDrive/Colab_Checkpoints/Project1/coco/annotations_trainval2017.zip"
-  use_coco: false
+  use_coco: true
   batch_size: 8
   num_workers: 2
 
 train:
-  epochs: 50
+  epochs: 80
   lr: 0.0001
   weight_decay: 0.0005
   checkpoint_dir: "/content/drive/MyDrive/Colab_Checkpoints/Project1/v5.0"
