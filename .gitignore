@@ -2,7 +2,7 @@
 _*.md
 _history
 submit/
-data/
+/data/
 __pycache__/
 *.pth
 *.onnx
