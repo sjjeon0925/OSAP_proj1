@@ -3,7 +3,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torchvision.models import efficientnet_b3, EfficientNet_B3_Weights
+from torchvision.models import efficientnet_b0, EfficientNet_B0_Weights
 
 
 def conv1x1(in_ch: int, out_ch: int) -> nn.Conv2d:
@@ -51,44 +51,44 @@ class ASPP(nn.Module):
 
 class SemanticSegmentationModel(nn.Module):
     """
-    EfficientNet-B3 (output stride=16) + ASPP(128ch) + DeepLabV3+ Decoder
+    EfficientNet-B0 (output stride=16) + ASPP(64ch) + DeepLabV3+ Decoder
 
-    EfficientNet-B3 stage 구성:
-      stage01 : features[0-1], 1/2,  24ch
-      stage2  : features[2],   1/4,  32ch  ← skip connection
-      stage3  : features[3],   1/8,  48ch
-      stage4  : features[4],   1/16, 96ch
-      stage5  : features[5],   1/16, 136ch
-      stage6  : features[6],   1/16, 232ch (stride→dilation=2)
-      stage7  : features[7],   1/16, 384ch → ASPP 입력
+    EfficientNet-B0 stage 구성:
+      stage01 : features[0-1], 1/2,  16ch
+      stage2  : features[2],   1/4,  24ch  ← skip connection
+      stage3  : features[3],   1/8,  40ch
+      stage4  : features[4],   1/16, 80ch
+      stage5  : features[5],   1/16, 112ch
+      stage6  : features[6],   1/16, 192ch (stride→dilation=2)
+      stage7  : features[7],   1/16, 320ch → ASPP 입력
     """
     def __init__(self, num_classes: int = 21) -> None:
         super().__init__()
-        backbone = efficientnet_b3(weights=EfficientNet_B3_Weights.IMAGENET1K_V1)
+        backbone = efficientnet_b0(weights=EfficientNet_B0_Weights.IMAGENET1K_V1)
         feats = backbone.features
 
-        self.stage01 = nn.Sequential(feats[0], feats[1])          # 1/2,  24ch
-        self.stage2  = feats[2]                                    # 1/4,  32ch
-        self.stage3  = feats[3]                                    # 1/8,  48ch
-        self.stage4  = feats[4]                                    # 1/16, 96ch
-        self.stage5  = feats[5]                                    # 1/16, 136ch
-        self.stage6  = _make_dilated(feats[6], dilation=2)        # 1/16, 232ch
-        self.stage7  = feats[7]                                    # 1/16, 384ch
+        self.stage01 = nn.Sequential(feats[0], feats[1])          # 1/2,  16ch
+        self.stage2  = feats[2]                                    # 1/4,  24ch
+        self.stage3  = feats[3]                                    # 1/8,  40ch
+        self.stage4  = feats[4]                                    # 1/16, 80ch
+        self.stage5  = feats[5]                                    # 1/16, 112ch
+        self.stage6  = _make_dilated(feats[6], dilation=2)        # 1/16, 192ch
+        self.stage7  = feats[7]                                    # 1/16, 320ch
 
-        self.aspp = ASPP(in_ch=384, out_ch=128, rates=[6, 12, 18])
+        self.aspp = ASPP(in_ch=320, out_ch=64, rates=[6, 12, 18])
 
         self.low_level_proj = nn.Sequential(
-            conv1x1(32, 16), nn.BatchNorm2d(16), nn.ReLU(inplace=True)
+            conv1x1(24, 12), nn.BatchNorm2d(12), nn.ReLU(inplace=True)
         )
 
         self.decoder = nn.Sequential(
-            nn.Conv2d(128 + 16, 128, 3, padding=1, bias=False),
-            nn.BatchNorm2d(128), nn.ReLU(inplace=True),
-            nn.Conv2d(128, 128, 3, padding=1, bias=False),
-            nn.BatchNorm2d(128), nn.ReLU(inplace=True),
+            nn.Conv2d(64 + 12, 64, 3, padding=1, bias=False),
+            nn.BatchNorm2d(64), nn.ReLU(inplace=True),
+            nn.Conv2d(64, 64, 3, padding=1, bias=False),
+            nn.BatchNorm2d(64), nn.ReLU(inplace=True),
         )
 
-        self.head = nn.Conv2d(128, num_classes, 1)
+        self.head = nn.Conv2d(64, num_classes, 1)
 
     def backbone_params(self):
         params = []
@@ -107,12 +107,12 @@ class SemanticSegmentationModel(nn.Module):
         input_size = x.shape[-2:]
 
         x  = self.stage01(x)   # 1/2
-        l1 = self.stage2(x)    # 1/4, 32ch ← skip
+        l1 = self.stage2(x)    # 1/4, 24ch ← skip
         x  = self.stage3(l1)   # 1/8
         x  = self.stage4(x)    # 1/16
         x  = self.stage5(x)    # 1/16
         x  = self.stage6(x)    # 1/16, dilated
-        x  = self.stage7(x)    # 1/16, 384ch
+        x  = self.stage7(x)    # 1/16, 320ch
 
         x = self.aspp(x)
         x = F.interpolate(x, size=l1.shape[-2:], mode='bilinear', align_corners=False)
