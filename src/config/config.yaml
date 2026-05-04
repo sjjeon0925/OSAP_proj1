@@ -10,6 +10,7 @@ data:
   coco_zip_images: "/content/drive/MyDrive/Colab_Checkpoints/Project1/coco/train2017.zip"
   coco_zip_annotations: "/content/drive/MyDrive/Colab_Checkpoints/Project1/coco/annotations_trainval2017.zip"
   use_coco: true
+  coco_max_samples: 20000
   batch_size: 8
   num_workers: 2
 

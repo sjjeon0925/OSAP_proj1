@@ -72,7 +72,8 @@ class COCOVOCSegmentation(CocoDetection):
     - iscrowd=1 어노테이션 무시.
     - VOC 클래스 어노테이션이 없는 이미지 제외.
     """
-    def __init__(self, coco_root: str, transform: Optional[Callable] = None) -> None:
+    def __init__(self, coco_root: str, transform: Optional[Callable] = None,
+                 max_samples: Optional[int] = None) -> None:
         img_dir  = os.path.join(coco_root, 'train2017')
         ann_file = os.path.join(coco_root, 'annotations', 'instances_train2017.json')
         super().__init__(root=img_dir, annFile=ann_file, transforms=None)
@@ -84,6 +85,11 @@ class COCOVOCSegmentation(CocoDetection):
         for cat_id in voc_cat_ids:
             img_ids.update(self.coco.getImgIds(catIds=[cat_id]))
         self.ids = sorted(img_ids)
+
+        if max_samples is not None and max_samples < len(self.ids):
+            import random
+            random.seed(42)
+            self.ids = random.sample(self.ids, max_samples)
 
     def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
         from pycocotools import mask as coco_mask
@@ -161,7 +167,9 @@ def get_dataloader(data_config: dict, image_set: str = "train",
                 f"  이미지: {coco_root}/train2017/\n"
                 f"  어노테이션: {coco_root}/annotations/instances_train2017.json"
             )
-        coco_dataset = COCOVOCSegmentation(coco_root=coco_root, transform=transform)
+        max_samples = data_config.get('coco_max_samples', None)
+        coco_dataset = COCOVOCSegmentation(coco_root=coco_root, transform=transform,
+                                           max_samples=max_samples)
         dataset = ConcatDataset([voc_dataset, coco_dataset])
         print(f"Dataset: VOC({len(voc_dataset)}) + COCO({len(coco_dataset)}) = {len(dataset)} samples")
     else:
