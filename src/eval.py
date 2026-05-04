@@ -50,13 +50,7 @@ def main():
     model.eval()
 
     print("\n--- Performance Evaluation ---")
-    val_loader = get_dataloader(
-        config['data']['root'],
-        config['data']['batch_size'],
-        image_set="val",
-        num_workers=config['data']['num_workers'],
-        download=True,
-    )
+    val_loader = get_dataloader(config['data'], image_set="val", download=True)
     miou = evaluate_miou(model, val_loader, device, config['model']['num_classes'])
     print(f"Val mIoU: {miou:.4f}")
 

@@ -1,19 +1,43 @@
 """src/data/dataset.py"""
 
 import os
+import numpy as np
 from typing import Optional, Tuple, Callable
 
 import torch
-from torch.utils.data import DataLoader, Dataset
-from torchvision.datasets import VOCSegmentation
+from torch.utils.data import DataLoader, Dataset, ConcatDataset
+from torchvision.datasets import VOCSegmentation, CocoDetection
 from torchvision.transforms import v2
 from torchvision import tv_tensors
+from PIL import Image
+
+# COCO category_id → VOC class index 매핑 (배경=0 제외, 20개 클래스)
+COCO_TO_VOC = {
+    1:  15,  # person
+    2:  2,   # bicycle
+    3:  7,   # car
+    4:  14,  # motorcycle  → motorbike
+    5:  1,   # airplane    → aeroplane
+    6:  6,   # bus
+    7:  19,  # train
+    9:  4,   # boat
+    16: 3,   # bird
+    17: 8,   # cat
+    18: 12,  # dog
+    19: 13,  # horse
+    20: 17,  # sheep
+    21: 10,  # cow
+    44: 5,   # bottle
+    62: 9,   # chair
+    63: 18,  # couch       → sofa
+    64: 16,  # potted plant → pottedplant
+    67: 11,  # dining table → diningtable
+    72: 20,  # tv           → tvmonitor
+}
+
 
 class VOCSegmentationDataset(Dataset):
-    """
-    Pascal-VOC 2012 Segmentation 데이터셋 래퍼 클래스입니다.
-    torchvision.transforms.v2를 사용하여 이미지와 마스크에 동일한 변환을 적용합니다.
-    """
+    """Pascal-VOC 2012 Segmentation 래퍼."""
     def __init__(
         self,
         root: str,
@@ -22,13 +46,8 @@ class VOCSegmentationDataset(Dataset):
         download: bool = False
     ) -> None:
         super().__init__()
-        # validation 어노테이션은 학습에 사용 금지 규정이 있으므로 image_set 확인 주의
-        self.voc_data = VOCSegmentation(
-            root=root,
-            year="2012",
-            image_set=image_set,
-            download=download
-        )
+        self.voc_data = VOCSegmentation(root=root, year="2012",
+                                        image_set=image_set, download=download)
         self.transform = transform
 
     def __len__(self) -> int:
@@ -36,71 +55,123 @@ class VOCSegmentationDataset(Dataset):
 
     def __getitem__(self, index: int) -> Tuple[torch.Tensor, torch.Tensor]:
         img, mask = self.voc_data[index]
-
-        # transforms.v2에서 이미지와 마스크를 함께 처리하기 위해 tv_tensors로 래핑
-        img = tv_tensors.Image(img)
+        img  = tv_tensors.Image(img)
         mask = tv_tensors.Mask(mask)
 
         if self.transform is not None:
             img, mask = self.transform(img, mask)
 
-        # 마스크는 Long 타입의 1D 채널로 변환하여 반환 (CrossEntropyLoss 사용을 위함)
-        # mask shape: (1, H, W) -> (H, W)
-        mask = mask.to(torch.long).squeeze(0)
-        
-        return img, mask
+        return img, mask.to(torch.long).squeeze(0)
+
+
+class COCOVOCSegmentation(CocoDetection):
+    """
+    torchvision.datasets.CocoDetection 기반.
+    MS-COCO 2017 train → VOC 21-class 시맨틱 마스크 변환.
+    - COCO_TO_VOC 매핑에 해당하는 카테고리만 반영 (나머지는 배경=0).
+    - iscrowd=1 어노테이션 무시.
+    - VOC 클래스 어노테이션이 없는 이미지 제외.
+    """
+    def __init__(self, coco_root: str, transform: Optional[Callable] = None) -> None:
+        img_dir  = os.path.join(coco_root, 'train2017')
+        ann_file = os.path.join(coco_root, 'annotations', 'instances_train2017.json')
+        super().__init__(root=img_dir, annFile=ann_file, transforms=None)
+        self._seg_transform = transform
+
+        # VOC 카테고리가 포함된 이미지 ID만 수집
+        voc_cat_ids = list(COCO_TO_VOC.keys())
+        img_ids: set = set()
+        for cat_id in voc_cat_ids:
+            img_ids.update(self.coco.getImgIds(catIds=[cat_id]))
+        self.ids = sorted(img_ids)
+
+    def __getitem__(self, idx: int) -> Tuple[torch.Tensor, torch.Tensor]:
+        from pycocotools import mask as coco_mask
+
+        img_id   = self.ids[idx]
+        img_info = self.coco.loadImgs(img_id)[0]
+        H, W     = img_info['height'], img_info['width']
+
+        img        = self._load_image(img_id)  # PIL Image
+        mask_array = np.zeros((H, W), dtype=np.uint8)
+
+        for ann in self._load_target(img_id):
+            if ann.get('iscrowd', 0):
+                continue
+            cat_id = ann['category_id']
+            if cat_id not in COCO_TO_VOC:
+                continue
+            seg = ann['segmentation']
+            if isinstance(seg, list):
+                rle    = coco_mask.frPyObjects(seg, H, W)
+                binary = coco_mask.decode(coco_mask.merge(rle))
+            else:
+                binary = coco_mask.decode(seg)
+            mask_array[binary > 0] = COCO_TO_VOC[cat_id]
+
+        img  = tv_tensors.Image(img)
+        mask = tv_tensors.Mask(Image.fromarray(mask_array))
+
+        if self._seg_transform is not None:
+            img, mask = self._seg_transform(img, mask)
+
+        return img, mask.to(torch.long).squeeze(0)
 
 
 def get_transforms(is_train: bool) -> v2.Compose:
-    """
-    학습 및 평가용 데이터 증강 파이프라인을 반환합니다.
-    """
     if is_train:
         return v2.Compose([
-            # 랜덤 리사이즈 및 크롭 (입력 해상도는 성능/FLOPs 트레이드오프에 따라 조정 가능)
             v2.RandomResize(min_size=320, max_size=640),
-            # 마스크의 빈 공간(패딩)은 ignore_label인 255로 채움
             v2.RandomCrop(size=(480, 480), pad_if_needed=True, fill={tv_tensors.Mask: 255}),
             v2.RandomHorizontalFlip(p=0.5),
             v2.ToDtype(torch.float32, scale=True),
-            # ImageNet 정규화 수치
             v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         ])
     else:
         return v2.Compose([
-            # 검증 시 배치 단위 처리를 위해 크기를 고정 (학습과 동일한 크기)
             v2.Resize((480, 480)),
             v2.ToDtype(torch.float32, scale=True),
             v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         ])
 
 
-def get_dataloader(
-    data_dir: str,
-    batch_size: int,
-    image_set: str = "train",
-    num_workers: int = 4,
-    download: bool = False
-) -> DataLoader:
+def get_dataloader(data_config: dict, image_set: str = "train",
+                   download: bool = False) -> DataLoader:
     """
-    데이터 로더를 생성하여 반환합니다.
+    data_config: config['data'] 딕셔너리
+    - 학습 시 use_coco=true이면 VOC + COCO 합산 데이터셋 사용
+    - 검증은 항상 VOC val만 사용
     """
-    is_train = image_set == "train"
-    
-    dataset = VOCSegmentationDataset(
-        root=data_dir,
+    is_train   = image_set == "train"
+    transform  = get_transforms(is_train)
+
+    voc_dataset = VOCSegmentationDataset(
+        root=data_config['root'],
         image_set=image_set,
-        transform=get_transforms(is_train=is_train),
-        download=download
+        transform=transform,
+        download=download,
     )
 
-    loader = DataLoader(
+    if is_train and data_config.get('use_coco', False):
+        coco_root = data_config['coco_root']
+        if not os.path.isdir(os.path.join(coco_root, 'train2017')):
+            raise FileNotFoundError(
+                f"COCO train2017 not found at '{coco_root}/train2017'.\n"
+                f"MS-COCO 2017 train 데이터를 해당 경로에 준비해주세요.\n"
+                f"  이미지: {coco_root}/train2017/\n"
+                f"  어노테이션: {coco_root}/annotations/instances_train2017.json"
+            )
+        coco_dataset = COCOVOCSegmentation(coco_root=coco_root, transform=transform)
+        dataset = ConcatDataset([voc_dataset, coco_dataset])
+        print(f"Dataset: VOC({len(voc_dataset)}) + COCO({len(coco_dataset)}) = {len(dataset)} samples")
+    else:
+        dataset = voc_dataset
+
+    return DataLoader(
         dataset,
-        batch_size=batch_size,
+        batch_size=data_config['batch_size'],
         shuffle=is_train,
-        num_workers=num_workers,
+        num_workers=data_config['num_workers'],
         pin_memory=True,
-        drop_last=is_train
+        drop_last=is_train,
     )
-    
-    return loader

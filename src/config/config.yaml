@@ -6,23 +6,27 @@ model:
 
 data:
   root: "./data"
-  batch_size: 4
+  coco_root: "/content/data/coco"
+  coco_zip_images: "/content/drive/MyDrive/Colab_Checkpoints/Project1/coco/train2017.zip"
+  coco_zip_annotations: "/content/drive/MyDrive/Colab_Checkpoints/Project1/coco/annotations_trainval2017.zip"
+  use_coco: true
+  batch_size: 8
   num_workers: 2
 
 train:
-  epochs: 50
+  epochs: 80
   lr: 0.0001
   weight_decay: 0.0005
-  checkpoint_dir: "/content/drive/MyDrive/Colab_Checkpoints/Project1/v4"
+  checkpoint_dir: "/content/drive/MyDrive/Colab_Checkpoints/Project1/v4.2"
   resume: false # true로 변경 시 latest_model.pth에서 이어서 학습
 
 wandb:
   use: true
   entity: "sjjeon0925-sungkyunkwan-university"  # 본인의 WandB ID로 수정
-  name: "resnet101_deeplabv3plus_v4"
+  name: "resnet101_deeplabv3plus_v4.2_difflr"
 
 submit:
   img_zip: "/content/drive/MyDrive/Colab_Checkpoints/Project1/img/img.zip"
   img_dir: "submit/img"
-  pred_dir: "/content/drive/MyDrive/Colab_Checkpoints/Project1/v4/pred"
-  onnx_path: "/content/drive/MyDrive/Colab_Checkpoints/Project1/v4/model.onnx"
+  pred_dir: "/content/drive/MyDrive/Colab_Checkpoints/Project1/v4.2/pred"
+  onnx_path: "/content/drive/MyDrive/Colab_Checkpoints/Project1/v4.2/model.onnx"

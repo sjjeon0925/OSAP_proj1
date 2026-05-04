@@ -2,3 +2,8 @@
 _*.md
 _history
 submit/
+data/
+__pycache__/
+*.pth
+*.onnx
+wandb/

@@ -33,16 +33,22 @@ def train():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # Colab 서버에 데이터가 없을 경우를 대비해 항상 다운로드를 확인하도록 수정
-    train_loader = get_dataloader(config['data']['root'], config['data']['batch_size'], "train",
-                                  num_workers=config['data']['num_workers'], download=True)
-    val_loader = get_dataloader(config['data']['root'], config['data']['batch_size'], "val",
-                                num_workers=config['data']['num_workers'], download=True)
+    train_loader = get_dataloader(config['data'], "train", download=True)
+    val_loader   = get_dataloader(config['data'], "val",   download=True)
     model = build_model(num_classes=config['model']['num_classes']).to(device)
 
     criterion = nn.CrossEntropyLoss(ignore_index=255)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=config['train']['lr'], weight_decay=config['train']['weight_decay'])
+
+    # Backbone은 pretrained이므로 낮은 lr, Decoder/Head는 random init이므로 10배 높은 lr
+    backbone_lr = config['train']['lr']
+    decoder_lr  = config['train']['lr'] * 10
+    optimizer = torch.optim.AdamW([
+        {'params': model.backbone_params(), 'lr': backbone_lr},
+        {'params': model.decoder_params(),  'lr': decoder_lr},
+    ], weight_decay=config['train']['weight_decay'])
+
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, T_max=config['train']['epochs'], eta_min=config['train']['lr'] * 0.01
+        optimizer, T_max=config['train']['epochs'], eta_min=backbone_lr * 0.01
     )
 
     start_epoch = 0
@@ -94,7 +100,7 @@ def train():
         miou = validate(model, val_loader, device, config['model']['num_classes'])
         print(f"Epoch {epoch+1} | Avg Train Loss: {avg_train_loss:.4f} | Val mIoU: {miou:.4f}")
 
-        current_lr = scheduler.get_last_lr()[0]
+        backbone_lr_cur, decoder_lr_cur = scheduler.get_last_lr()
         scheduler.step()
 
         if config['wandb']['use']:
@@ -102,7 +108,8 @@ def train():
                 "epoch": epoch + 1,
                 "epoch_train_loss": avg_train_loss,
                 "val_miou": miou,
-                "lr": current_lr,
+                "lr_backbone": backbone_lr_cur,
+                "lr_decoder": decoder_lr_cur,
             })
 
         # 옵티마이저 상태와 에포크를 포함하여 체크포인트 저장

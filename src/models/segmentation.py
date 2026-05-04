@@ -65,44 +65,23 @@ class ASPP(nn.Module):
 
 class SemanticSegmentationModel(nn.Module):
     """
-    ResNet101 (output stride=8) + ASPP + Multi-scale Decoder
+    ResNet101 (output stride=16) + ASPP + DeepLabV3+ Decoder
 
-    output stride=8: layer3(dilation=2) + layer4(dilation=4) 로 고해상도 feature 유지.
-    Multi-scale decoder: layer2(1/8, 512ch)를 ASPP와 동해상도에서 먼저 합치고,
-                         layer1(1/4, 256ch)과 한 번 더 합쳐 경계 복원력을 높임.
+    Standard DeepLabV3+: layer1(1/4) skip connection만 사용.
+    layer2 mid-level fusion 제거 → decoder 안정성 향상.
     """
     def __init__(self, num_classes: int = 21) -> None:
         super().__init__()
 
         backbone = resnet101(weights=ResNet101_Weights.IMAGENET1K_V1)
 
-        # Stem: 1/4 resolution
-        self.stem = nn.Sequential(
-            backbone.conv1, backbone.bn1, backbone.relu, backbone.maxpool
-        )
-        self.layer1 = backbone.layer1   # 1/4,  256ch  ← low-level (fine)
-        self.layer2 = backbone.layer2   # 1/8,  512ch  ← low-level (mid)
-        # layer3: stride 제거 + dilation=2  → 1/8 해상도 유지, 1024ch
-        self.layer3 = _make_layer_dilated(backbone.layer3, dilation=2)
-        # layer4: stride 제거 + dilation=4  → 1/8 해상도 유지, 2048ch
-        self.layer4 = _make_layer_dilated(backbone.layer4, dilation=4)
+        self.stem   = nn.Sequential(backbone.conv1, backbone.bn1, backbone.relu, backbone.maxpool)
+        self.layer1 = backbone.layer1   # 1/4,  256ch  ← skip connection
+        self.layer2 = backbone.layer2   # 1/8,  512ch
+        self.layer3 = backbone.layer3   # 1/16, 1024ch
+        self.layer4 = _make_layer_dilated(backbone.layer4, dilation=2)  # 1/16, 2048ch
 
-        # ASPP: output stride=8이므로 rate를 2배 스케일 적용
-        self.aspp = ASPP(in_ch=2048, out_ch=256, rates=[12, 24, 36])
-
-        # Mid-level projection: layer2 (1/8, 512ch) → 64ch
-        self.mid_level_proj = nn.Sequential(
-            conv1x1(512, 64),
-            nn.BatchNorm2d(64),
-            nn.ReLU(inplace=True)
-        )
-
-        # ASPP(256) + mid(64) → 1/8 fusion
-        self.fuse_mid = nn.Sequential(
-            nn.Conv2d(256 + 64, 256, kernel_size=3, padding=1, bias=False),
-            nn.BatchNorm2d(256),
-            nn.ReLU(inplace=True)
-        )
+        self.aspp = ASPP(in_ch=2048, out_ch=256, rates=[6, 12, 18])
 
         # Low-level projection: layer1 (1/4, 256ch) → 48ch
         self.low_level_proj = nn.Sequential(
@@ -111,7 +90,7 @@ class SemanticSegmentationModel(nn.Module):
             nn.ReLU(inplace=True)
         )
 
-        # fuse_mid(256) upsample + low(48) → 1/4 fusion → decode
+        # Decoder: ASPP(256) upsample + low(48) → 256ch
         self.decoder = nn.Sequential(
             nn.Conv2d(256 + 48, 256, kernel_size=3, padding=1, bias=False),
             nn.BatchNorm2d(256),
@@ -123,24 +102,29 @@ class SemanticSegmentationModel(nn.Module):
 
         self.head = nn.Conv2d(256, num_classes, kernel_size=1)
 
+    def backbone_params(self):
+        return (list(self.stem.parameters()) + list(self.layer1.parameters()) +
+                list(self.layer2.parameters()) + list(self.layer3.parameters()) +
+                list(self.layer4.parameters()))
+
+    def decoder_params(self):
+        return (list(self.aspp.parameters()) + list(self.low_level_proj.parameters()) +
+                list(self.decoder.parameters()) + list(self.head.parameters()))
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         input_size = x.shape[-2:]
 
-        x = self.stem(x)
+        x  = self.stem(x)
         l1 = self.layer1(x)    # 1/4,  256ch
-        l2 = self.layer2(l1)   # 1/8,  512ch
-        x  = self.layer3(l2)   # 1/8,  1024ch (dilated)
-        x  = self.layer4(x)    # 1/8,  2048ch (dilated)
+        x  = self.layer2(l1)   # 1/8
+        x  = self.layer3(x)    # 1/16
+        x  = self.layer4(x)    # 1/16, dilated
 
-        x = self.aspp(x)       # 1/8,  256ch
+        x = self.aspp(x)       # 1/16, 256ch
 
-        # 1/8: ASPP + mid-level layer2 feature 합산
-        x = self.fuse_mid(torch.cat([x, self.mid_level_proj(l2)], dim=1))
-
-        # 1/4로 upsample 후 low-level layer1 feature 합산
+        # 1/16 → 1/4: upsample + layer1 skip
         x = F.interpolate(x, size=l1.shape[-2:], mode='bilinear', align_corners=False)
-        x = torch.cat([x, self.low_level_proj(l1)], dim=1)
-        x = self.decoder(x)
+        x = self.decoder(torch.cat([x, self.low_level_proj(l1)], dim=1))
 
         x = self.head(x)
         x = F.interpolate(x, size=input_size, mode='bilinear', align_corners=False)
