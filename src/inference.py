@@ -1,6 +1,7 @@
 """src/inference.py"""
 import os
 import yaml
+import zipfile
 import torch
 import numpy as np
 from PIL import Image
@@ -26,17 +27,34 @@ def load_model(config, device):
     return model
 
 
-def run_inference(model, device, pred_dir):
+def prepare_images(img_zip: str, img_dir: str) -> None:
+    """Drive의 zip을 img_dir에 압축 해제. 이미 이미지가 있으면 건너뜀."""
+    os.makedirs(img_dir, exist_ok=True)
+    existing = [f for f in os.listdir(img_dir) if f.lower().endswith(('.jpg', '.jpeg', '.png'))]
+    if existing:
+        print(f"Images already exist in '{img_dir}' ({len(existing)} files). Skipping extraction.")
+        return
+
+    if not os.path.isfile(img_zip):
+        print(f"Error: zip file not found at '{img_zip}'")
+        return
+
+    print(f"Extracting '{img_zip}' → '{img_dir}' ...")
+    with zipfile.ZipFile(img_zip, 'r') as zf:
+        zf.extractall(img_dir)
+    print(f"Extraction complete. ({len(os.listdir(img_dir))} files)")
+
+
+def run_inference(model, device, img_dir, pred_dir):
     transform = v2.Compose([
         v2.ToDtype(torch.float32, scale=True),
         v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     ])
 
-    img_dir = "submit/img"
-    os.makedirs(img_dir, exist_ok=True)
     os.makedirs(pred_dir, exist_ok=True)
 
     img_files = sorted(f for f in os.listdir(img_dir) if f.lower().endswith(('.png', '.jpg', '.jpeg')))
+
     if not img_files:
         print(f"No images found in '{img_dir}'. 테스트할 이미지를 폴더에 넣어주세요.")
         return
@@ -94,7 +112,8 @@ def main():
     if model is None:
         return
 
-    run_inference(model, device, pred_dir=config['submit']['pred_dir'])
+    prepare_images(img_zip=config['submit']['img_zip'], img_dir=config['submit']['img_dir'])
+    run_inference(model, device, img_dir=config['submit']['img_dir'], pred_dir=config['submit']['pred_dir'])
     export_onnx(model, save_path=config['submit']['onnx_path'])
 
 
