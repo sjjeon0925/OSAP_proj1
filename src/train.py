@@ -66,6 +66,7 @@ def train():
             optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
             if 'scheduler_state_dict' in checkpoint:
                 scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+                scheduler.T_max = config['train']['epochs']  # 구 체크포인트의 T_max를 현재 config로 덮어쓰기
             print(f"=> Loaded checkpoint (epoch {checkpoint['epoch']})")
         else:
             print(f"=> No checkpoint found at '{latest_ckpt_path}', starting from scratch.")
